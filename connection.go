@@ -47,7 +47,7 @@ func (c *connection) CreateKeySpaceIfNotExist(name, replication string) (KeySpac
 	if replication == "" {
 		replication = DefaultReplication
 	}
-	stmt := fmt.Sprintf("CREATE KEYSPACE %s WITH replication = %s;", name, replication)
+	stmt := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = %s;", name, replication)
 	if err := c.q.Execute(stmt); err != nil {
 		return nil, err
 	}

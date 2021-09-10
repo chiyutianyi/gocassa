@@ -22,6 +22,7 @@ type tableInfo struct {
 	marshalSource  interface{}
 	fieldSource    map[string]interface{}
 	keys           Keys
+	types          []*typeInfo
 	fieldNames     map[string]struct{} // This is here only to check containment
 	fields         []string
 	fieldValues    []interface{}
@@ -35,6 +36,7 @@ func newTableInfo(keyspace, name string, keys Keys, entity interface{}, fieldSou
 		keys:          keys,
 		fieldSource:   fieldSource,
 	}
+	types := []*typeInfo{}
 	fields := []string{}
 	values := []interface{}{}
 	for k, v := range fieldSource {
@@ -45,6 +47,7 @@ func newTableInfo(keyspace, name string, keys Keys, entity interface{}, fieldSou
 	for _, v := range fields {
 		cinf.fieldNames[v] = struct{}{}
 	}
+	cinf.types = types
 	cinf.fields = fields
 	cinf.fieldValues = values
 	return cinf
@@ -196,7 +199,7 @@ func (t t) CreateIfNotExist() error {
 }
 
 func (t t) Recreate() error {
-	if ex, err := t.keySpace.Exists(t.Name()); ex && err == nil {
+	if ex, err := t.keySpace.ExistsTable(t.Name()); ex && err == nil {
 		if err := t.keySpace.DropTable(t.Name()); err != nil {
 			return err
 		}
@@ -208,6 +211,7 @@ func (t t) Recreate() error {
 
 func (t t) CreateStatement() (string, error) {
 	return createTable(t.keySpace.name,
+		t.keySpace.types,
 		t.Name(),
 		t.info.keys.PartitionKeys,
 		t.info.keys.ClusteringColumns,
@@ -222,6 +226,7 @@ func (t t) CreateStatement() (string, error) {
 
 func (t t) CreateIfNotExistStatement() (string, error) {
 	return createTableIfNotExist(t.keySpace.name,
+		t.keySpace.types,
 		t.Name(),
 		t.info.keys.PartitionKeys,
 		t.info.keys.ClusteringColumns,

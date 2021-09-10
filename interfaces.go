@@ -16,6 +16,7 @@ type Connection interface {
 
 // KeySpace is used to obtain tables from.
 type KeySpace interface {
+	Type(typeName string, row interface{}) Type
 	MapTable(tableName, id string, row interface{}) MapTable
 	MultimapTable(tableName, fieldToIndexBy, uniqueKey string, row interface{}) MultimapTable
 	MultimapMultiKeyTable(tableName string, fieldToIndexBy, uniqueKey []string, row interface{}) MultimapMkTable
@@ -28,10 +29,14 @@ type KeySpace interface {
 	DebugMode(bool)
 	// Name returns the keyspace name as in C*
 	Name() string
-	// Tables returns the name of all configured column families in this keyspace
+	// Types returns the name of all configured table in this keyspace
+	Types() ([]string, error)
+	// Tables returns the name of all configured table in this keyspace
 	Tables() ([]string, error)
-	// Exists returns whether the specified column family exists within the keyspace
-	Exists(string) (bool, error)
+	// ExistsType returns whether the specified type exists within the keyspace
+	ExistsType(string) (bool, error)
+	// ExistsTable returns whether the specified table exists within the keyspace
+	ExistsTable(string) (bool, error)
 }
 
 //
@@ -197,6 +202,29 @@ type Table interface {
 	// Name returns the underlying table name, as stored in C*
 	WithOptions(Options) Table
 	TableChanger
+}
+
+// Danger zone! Do not use this interface unless you really know what you are doing
+type TypeChanger interface {
+	// Create creates the table in the keySpace, but only if it does not exist already.
+	// If the table already exists, it returns an error.
+	Create() error
+	// CreateStatement returns you the CQL query which can be used to create the table manually in cqlsh
+	CreateStatement() (string, error)
+	// Create creates the table in the keySpace, but only if it does not exist already.
+	// If the table already exists, then nothing is created.
+	CreateIfNotExist() error
+	// CreateStatement returns you the CQL query which can be used to create the table manually in cqlsh
+	CreateIfNotExistStatement() (string, error)
+	// Recreate drops the table if exists and creates it again.
+	// This is useful for test purposes only.
+	Recreate() error
+	// Name returns the name of the table, as in C*
+	Name() string
+}
+
+type Type interface {
+	TypeChanger
 }
 
 // QueryExecutor actually executes the queries - this is mostly useful for testing/mocking purposes,

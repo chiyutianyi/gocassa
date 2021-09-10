@@ -63,10 +63,12 @@ func (c *connection) DropKeySpace(name string) error {
 // KeySpace returns the keyspace having the given name.
 func (c *connection) KeySpace(name string) KeySpace {
 	k := &k{
-		qe:   c.q,
-		name: name,
+		qe:    c.q,
+		name:  name,
+		types: map[string]string{},
 	}
 	k.tableFactory = k
+	k.typeFactory = k
 	return k
 }
 

@@ -23,15 +23,20 @@ type KeySpace interface {
 	MultiTimeSeriesTable(tableName, fieldToIndexByField, timeField, uniqueKey string, bucketSize time.Duration, row interface{}) MultiTimeSeriesTable
 	FlexMultiTimeSeriesTable(name, timeField, idField string, indexFields []string, bucketer Bucketer, row interface{}) MultiTimeSeriesTable
 	Table(tableName string, row interface{}, keys Keys) Table
+	Type(typeName string, row interface{}) Type
 	// DebugMode enables/disables debug mode depending on the value of the input boolean.
 	// When DebugMode is enabled, all built CQL statements are printe to stdout.
 	DebugMode(bool)
 	// Name returns the keyspace name as in C*
 	Name() string
-	// Tables returns the name of all configured column families in this keyspace
+	// Tables returns the name of all configured table in this keyspace
 	Tables() ([]string, error)
-	// Exists returns whether the specified column family exists within the keyspace
-	Exists(string) (bool, error)
+	// ExistsTable returns whether the specified table exists within the keyspace
+	ExistsTable(string) (bool, error)
+	// Types returns the name of all configured table in this keyspace
+	Types() ([]string, error)
+	// ExistsType returns whether the specified type exists within the keyspace
+	ExistsType(string) (bool, error)
 }
 
 //
@@ -197,6 +202,29 @@ type Table interface {
 	// Name returns the underlying table name, as stored in C*
 	WithOptions(Options) Table
 	TableChanger
+}
+
+// Danger zone! Do not use this interface unless you really know what you are doing
+type TypeChanger interface {
+	// Create creates the type in the keySpace, but only if it does not exist already.
+	// If the type already exists, it returns an error.
+	Create() error
+	// CreateStatement returns you the CQL query which can be used to create the type manually in cqlsh
+	CreateStatement() (string, error)
+	// Create creates the type in the keySpace, but only if it does not exist already.
+	// If the type already exists, then nothing is created.
+	CreateIfNotExist() error
+	// CreateStatement returns you the CQL query which can be used to create the type manually in cqlsh
+	CreateIfNotExistStatement() (string, error)
+	// Recreate drops the type if exists and creates it again.
+	// This is useful for test purposes only.
+	Recreate() error
+	// Name returns the name of the type, as in C*
+	Name() string
+}
+
+type Type interface {
+	TypeChanger
 }
 
 // QueryExecutor actually executes the queries - this is mostly useful for testing/mocking purposes,

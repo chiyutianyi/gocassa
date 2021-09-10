@@ -2,9 +2,14 @@ package gocassa
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 )
+
+type typeFactory interface {
+	NewType(string, interface{}, map[string]interface{}) Type
+}
 
 type tableFactory interface {
 	NewTable(string, interface{}, map[string]interface{}, Keys) Table
@@ -14,6 +19,8 @@ type k struct {
 	qe           QueryExecutor
 	name         string
 	debugMode    bool
+	types        map[string]string
+	typeFactory  typeFactory
 	tableFactory tableFactory
 }
 
@@ -28,6 +35,29 @@ func ConnectToKeySpace(keySpace string, nodeIps []string, username, password str
 
 func (k *k) DebugMode(b bool) {
 	k.debugMode = b
+}
+
+func (k *k) Type(name string, entity interface{}) Type {
+	m, ok := toMap(entity)
+	if !ok {
+		panic("Unrecognized row type")
+	}
+	k.types[reflect.ValueOf(entity).Type().String()] = name
+	return k.NewType(name, entity, m)
+}
+
+func (k *k) NewType(name string, entity interface{}, fields map[string]interface{}) Type {
+	// Act both as a proxy to a tableFactory, and as the tableFactory itself (in most situations, a k will be its own
+	// tableFactory, but not always [ie. mocking])
+	if k.typeFactory != k {
+		return k.typeFactory.NewType(name, entity, fields)
+	} else {
+		ti := newTypeInfo(k.name, name, entity, fields)
+		return &udt{
+			keySpace: k,
+			info:     ti,
+		}
+	}
 }
 
 func (k *k) Table(name string, entity interface{}, keys Keys) Table {
@@ -142,6 +172,20 @@ func (k *k) FlexMultiTimeSeriesTable(name, timeField, idField string, indexField
 	}
 }
 
+// Types returns type names in a keyspace
+func (k *k) Types() ([]string, error) {
+	const stmt = "SELECT type_name FROM system_schema.types WHERE keyspace_name = ?"
+	maps, err := k.qe.Query(stmt, k.name)
+	if err != nil {
+		return nil, err
+	}
+	ret := []string{}
+	for _, m := range maps {
+		ret = append(ret, m["type_name"].(string))
+	}
+	return ret, nil
+}
+
 // Tables returns table names in a keyspace
 func (k *k) Tables() ([]string, error) {
 	const stmt = "SELECT table_name FROM system_schema.tables WHERE keyspace_name = ?"
@@ -156,21 +200,39 @@ func (k *k) Tables() ([]string, error) {
 	return ret, nil
 }
 
-func (k *k) Exists(cf string) (bool, error) {
-	ts, err := k.Tables()
+func (k *k) ExistsType(udt string) (bool, error) {
+	ts, err := k.Types()
 	if err != nil {
 		return false, err
 	}
 	for _, v := range ts {
-		if strings.ToLower(v) == strings.ToLower(cf) {
+		if strings.EqualFold(v, udt) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (k *k) DropTable(cf string) error {
-	stmt := fmt.Sprintf("DROP TABLE IF EXISTS %s.%s", k.name, cf)
+func (k *k) DropType(udt string) error {
+	stmt := fmt.Sprintf("DROP TYPE IF EXISTS %s.%s", k.name, udt)
+	return k.qe.Execute(stmt)
+}
+
+func (k *k) ExistsTable(table string) (bool, error) {
+	ts, err := k.Tables()
+	if err != nil {
+		return false, err
+	}
+	for _, v := range ts {
+		if strings.EqualFold(v, table) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (k *k) DropTable(table string) error {
+	stmt := fmt.Sprintf("DROP TABLE IF EXISTS %s.%s", k.name, table)
 	return k.qe.Execute(stmt)
 }
 

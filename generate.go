@@ -28,19 +28,19 @@ import (
 // );
 //
 
-func createTableIfNotExist(keySpace, cf string, partitionKeys, colKeys []string, fields []string, values []interface{}, order []ClusteringOrderColumn, compoundKey, compact bool, compressor string) (string, error) {
-	return createTableStmt("CREATE TABLE IF NOT EXISTS", keySpace, cf, partitionKeys, colKeys, fields, values, order, compoundKey, compact, compressor)
+func createTableIfNotExist(keySpace string, types map[string]string, cf string, partitionKeys, colKeys []string, fields []string, values []interface{}, order []ClusteringOrderColumn, compoundKey, compact bool, compressor string) (string, error) {
+	return createTableStmt("CREATE TABLE IF NOT EXISTS", keySpace, types, cf, partitionKeys, colKeys, fields, values, order, compoundKey, compact, compressor)
 }
 
-func createTable(keySpace, cf string, partitionKeys, colKeys []string, fields []string, values []interface{}, order []ClusteringOrderColumn, compoundKey, compact bool, compressor string) (string, error) {
-	return createTableStmt("CREATE TABLE", keySpace, cf, partitionKeys, colKeys, fields, values, order, compoundKey, compact, compressor)
+func createTable(keySpace string, types map[string]string, cf string, partitionKeys, colKeys []string, fields []string, values []interface{}, order []ClusteringOrderColumn, compoundKey, compact bool, compressor string) (string, error) {
+	return createTableStmt("CREATE TABLE", keySpace, types, cf, partitionKeys, colKeys, fields, values, order, compoundKey, compact, compressor)
 }
 
-func createTableStmt(createStmt, keySpace, cf string, partitionKeys, colKeys []string, fields []string, values []interface{}, order []ClusteringOrderColumn, compoundKey, compact bool, compressor string) (string, error) {
+func createTableStmt(createStmt, keySpace string, types map[string]string, cf string, partitionKeys, colKeys []string, fields []string, values []interface{}, order []ClusteringOrderColumn, compoundKey, compact bool, compressor string) (string, error) {
 	firstLine := fmt.Sprintf("%s %v.%v (", createStmt, keySpace, cf)
 	fieldLines := []string{}
-	for i, _ := range fields {
-		typeStr, err := stringTypeOf(values[i])
+	for i := range fields {
+		typeStr, err := stringTypeOf(types, values[i])
 		if err != nil {
 			return "", err
 		}
@@ -90,6 +90,37 @@ func createTableStmt(createStmt, keySpace, cf string, partitionKeys, colKeys []s
 		}
 		compressionLine := fmt.Sprintf("%v compression = {'sstable_compression': '%v'}", compressionLineStart, compressor)
 		lines = append(lines, compressionLine)
+	}
+
+	lines = append(lines, ";")
+	stmt := strings.Join(lines, "\n")
+	return stmt, nil
+}
+
+func createTypeIfNotExist(keySpace, cf string, fields []string, values []interface{}) (string, error) {
+	return createTypeStmt("CREATE TYPE IF NOT EXISTS", keySpace, cf, fields, values)
+}
+
+func createType(keySpace, cf string, fields []string, values []interface{}) (string, error) {
+	return createTypeStmt("CREATE TYPE", keySpace, cf, fields, values)
+}
+
+func createTypeStmt(createStmt, keySpace, cf string, fields []string, values []interface{}) (string, error) {
+	firstLine := fmt.Sprintf("%s %v.%v (", createStmt, keySpace, cf)
+	fieldLines := []string{}
+	for i := range fields {
+		typeStr, err := stringTypeOf(nil, values[i])
+		if err != nil {
+			return "", err
+		}
+		l := "    " + strings.ToLower(fields[i]) + " " + typeStr
+		fieldLines = append(fieldLines, l)
+	}
+
+	lines := []string{
+		firstLine,
+		strings.Join(fieldLines, ",\n"),
+		")",
 	}
 
 	lines = append(lines, ";")
@@ -155,7 +186,7 @@ func cassaType(i interface{}) gocql.Type {
 	return gocql.TypeCustom
 }
 
-func stringTypeOf(i interface{}) (string, error) {
+func stringTypeOf(types map[string]string, i interface{}) (string, error) {
 	_, isByteSlice := i.([]byte)
 	if !isByteSlice {
 		// Check if we found a higher kinded type
@@ -164,25 +195,55 @@ func stringTypeOf(i interface{}) (string, error) {
 			elemVal := reflect.Indirect(reflect.New(reflect.TypeOf(i).Elem())).Interface()
 			ct := cassaType(elemVal)
 			if ct == gocql.TypeCustom {
+				if types != nil {
+					if udt := stringUdtOf(types, elemVal, "list<frozen<%v>>"); udt != "" {
+						return udt, nil
+					}
+				}
 				return "", fmt.Errorf("Unsupported type %T", i)
 			}
 			return fmt.Sprintf("list<%v>", ct), nil
 		case reflect.Map:
 			keyVal := reflect.Indirect(reflect.New(reflect.TypeOf(i).Key())).Interface()
-			elemVal := reflect.Indirect(reflect.New(reflect.TypeOf(i).Elem())).Interface()
 			keyCt := cassaType(keyVal)
+			if keyCt == gocql.TypeCustom {
+				return "", fmt.Errorf("Unsupported map key type %T", i)
+			}
+			elemVal := reflect.Indirect(reflect.New(reflect.TypeOf(i).Elem())).Interface()
 			elemCt := cassaType(elemVal)
-			if keyCt == gocql.TypeCustom || elemCt == gocql.TypeCustom {
-				return "", fmt.Errorf("Unsupported map key or value type %T", i)
+			if elemCt == gocql.TypeCustom {
+				if types != nil {
+					if udt := stringUdtOf(types, elemVal, "map<%v, frozen<%v>>", keyCt); udt != "" {
+						return udt, nil
+					}
+				}
+				return "", fmt.Errorf("Unsupported map value type %T", i)
 			}
 			return fmt.Sprintf("map<%v, %v>", keyCt, elemCt), nil
 		}
 	}
 	ct := cassaType(i)
 	if ct == gocql.TypeCustom {
+		if types != nil {
+			if udt := stringUdtOf(types, i, "frozen<%v>"); udt != "" {
+				return udt, nil
+			}
+		}
 		return "", fmt.Errorf("Unsupported type %T", i)
 	}
 	return cassaTypeToString(ct)
+}
+
+func stringUdtOf(types map[string]string, i interface{}, format string, a ...interface{}) string {
+	t := reflect.ValueOf(i).Type().String()
+	udt := types[t]
+	if udt == "" {
+		return ""
+	}
+	if a != nil {
+		return fmt.Sprintf(format, udt, a)
+	}
+	return fmt.Sprintf(format, udt)
 }
 
 func cassaTypeToString(t gocql.Type) (string, error) {

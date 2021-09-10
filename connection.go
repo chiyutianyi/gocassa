@@ -4,6 +4,10 @@ import (
 	"fmt"
 )
 
+const (
+	DefaultReplication = "{'class': 'SimpleStrategy', 'replication_factor': 1 }"
+)
+
 type connection struct {
 	q QueryExecutor
 }
@@ -30,9 +34,24 @@ func NewConnection(q QueryExecutor) Connection {
 }
 
 // CreateKeySpace creates a keyspace with the given name. Only used to create test keyspaces.
-func (c *connection) CreateKeySpace(name string) error {
-	stmt := fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1 };", name)
+func (c *connection) CreateKeySpace(name, replication string) error {
+	if replication == "" {
+		replication = DefaultReplication
+	}
+	stmt := fmt.Sprintf("CREATE KEYSPACE %s WITH replication = %s;", name, replication)
 	return c.q.Execute(stmt)
+}
+
+// CreateKeySpaceIfNotExist creates a keyspace with the given name if not exist. Only used to create test keyspaces.
+func (c *connection) CreateKeySpaceIfNotExist(name, replication string) (KeySpace, error) {
+	if replication == "" {
+		replication = DefaultReplication
+	}
+	stmt := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = %s;", name, replication)
+	if err := c.q.Execute(stmt); err != nil {
+		return nil, err
+	}
+	return c.KeySpace(name), nil
 }
 
 // DropKeySpace drops the keyspace having the given name.

@@ -47,7 +47,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	err = conn.CreateKeySpace(kname)
+	err = conn.CreateKeySpace(kname, "")
 	if err != nil {
 		panic(err)
 	}
